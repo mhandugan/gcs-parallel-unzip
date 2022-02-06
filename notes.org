@@ -1,0 +1,133 @@
+40 workers, 2000 queue; 2MB stride; ~6GB zip file
+handugan.com/big.zip has 1429 entries!
+Compilation started at Sun Feb  6 06:08:14
+Compilation finished at Sun Feb  6 06:28:50
+
+
+--
+
+Sort with largest files first
+Compilation started at Sun Feb  6 06:40:09
+Compilation finished at Sun Feb  6 07:01:27
+
+---
+80 workers
+Compilation started at Sun Feb  6 07:01:49
+Compilation finished at Sun Feb  6 07:17:12
+
+--
+120 workers
+Compilation started at Sun Feb  6 07:18:16
+Compilation finished at Sun Feb  6 07:40:12
+
+--
+80 workers
+sort fmro small to large
+Compilation started at Sun Feb  6 07:46:31
+Compilation finished at Sun Feb  6 08:06:10
+
+--
+80 workers
+sorted large to small
+(again)
+Compilation started at Sun Feb  6 08:10:53
+Compilation finished at Sun Feb  6 08:28:29
+
+https://github.com/jbenet/go-random-files
+
+go get -u github.com/jbenet/go-random-files/random-files
+
+random-files --depth 3 --files 3 --filesize=$((400 * 1024 * 1024)) --random-size  /mnt/hello/data/
+
+
+
+time gsutil -o GSUtil:parallel_composite_upload_threshold=150M cp big.zip gs://zip-source-1t/
+
+- [1 files][ 23.5 GiB/ 23.5 GiB]   86.8 MiB/s                                   
+Operation completed over 1 objects/23.5 GiB.                                     
+
+real	3m5.908s
+user	2m33.388s
+sys	1m6.772s
+
+---
+
+time ./gcs-parallel-unzip --progress --workers=10 --logtostderr
+I0206 22:21:05.120470    8985 main.go:220] zip-source-1t/big.zip has 493 entries!
+130.84KB/s [------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------] 
+
+real    2m16.218s
+user    1m51.000s
+sys     1m44.658s
+
+--
+
+mathew@instance-2:~$ time ./gcs-parallel-unzip --progress --workers=20 --logtostderr
+I0206 22:24:53.183542    9113 main.go:220] zip-source-1t/big.zip has 493 entries!
+139.78KB/s [------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------] 
+
+real    2m11.297s
+user    1m48.733s
+sys     1m39.976s
+
+--
+
+mathew@instance-2:~$ time ./gcs-parallel-unzip --progress --workers=40 --logtostderr
+I0206 22:28:13.656039    9124 main.go:220] zip-source-1t/big.zip has 493 entries!
+353.12KB/s [------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------] 
+
+real    2m28.802s
+user    1m57.283s
+sys     1m50.095s
+
+
+sudo iftop -t -n
+
+
+   # Host name (port/service if enabled)            last 2s   last 10s   last 40s cumulative
+--------------------------------------------------------------------------------------------
+   1 10.138.0.5                               =>     1.05Gb     1.11Gb     1.05Gb     2.11GB
+     108.177.98.128                           <=     1.17Gb     1.11Gb     1.05Gb     2.11GB
+   2 10.138.0.5                               =>     9.62Kb     12.3Kb     10.6Kb     21.2KB
+     50.218.52.178                            <=       832b     2.23Kb     1.84Kb     3.69KB
+   3 10.138.0.5                               =>     2.78Kb     2.78Kb     2.83Kb     5.66KB
+     35.235.244.1                             <=       416b       416b       442b       884B
+   4 10.138.0.5                               =>         0b        42b        52b       104B
+     74.125.199.95                            <=         0b        42b        52b       104B
+   5 10.138.0.5                               =>         0b         0b        20b        40B
+     169.254.169.254                          <=         0b         0b        40b        80B
+--------------------------------------------------------------------------------------------
+Total send rate:                                     1.05Gb     1.11Gb     1.05Gb
+Total receive rate:                                  1.17Gb     1.11Gb     1.05Gb
+Total send and receive rate:                         2.22Gb     2.22Gb     2.11Gb
+--------------------------------------------------------------------------------------------
+Peak rate (sent/received/total):                     1.32Gb     1.26Gb     2.26Gb
+Cumulative (sent/received/total):                    2.11GB     2.11GB     4.22GB
+============================================================================================
+
+
+
+
+   # Host name (port/service if enabled)            last 2s   last 10s   last 40s 
+----------------------------------------------------------------------------------
+   1 10.138.0.5                               =>     1.05Gb     1.11Gb     1.05Gb 
+     108.177.98.128                           <=     1.17Gb     1.11Gb     1.05Gb 
+----------------------------------------------------------------------------------
+Total send rate:                                     1.05Gb     1.11Gb     1.05Gb
+Total receive rate:                                  1.17Gb     1.11Gb     1.05Gb
+----------------------------------------------------------------------------------
+Peak rate (sent/received/total):                     1.32Gb     1.26Gb     2.26Gb
+==================================================================================
+
+
+
+mathew@instance-2:~$ time ./gcs-parallel-unzip --progress --workers=20 --logtostderr
+I0206 22:50:32.974870    9474 main.go:220] zip-source-1t/big.zip has 493 entries!
+122.72KB/s [------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------] 
+
+real    2m26.118s
+user    1m52.665s
+sys     1m55.889s
+
+
+(* 122.72 8) 
