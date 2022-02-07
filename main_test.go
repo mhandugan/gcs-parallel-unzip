@@ -8,7 +8,7 @@ import (
 
 func TestHello(t *testing.T) {
 	in := bytes.NewReader([]byte("0123456789abcdefghijklmnopqrstuvwxyz"))
-	c := &bCache{
+	c := &blockCache{
 		fsize:  int64(in.Len()),
 		ra:     in,
 		stride: 8,

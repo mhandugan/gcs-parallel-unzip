@@ -23,32 +23,77 @@ var (
 	sourceBucket   = flag.String("source_bucket", "zip-source-1t", "source bucket name")
 	zipFile        = flag.String("zip_file", "big.zip", "object id of zip file in the source bucket")
 	destBucket     = flag.String("destination_bucket", "zip-dest-1t", "destination bucket name")
-	numWorkers     = flag.Int("workers", 80, "number of workers")
+	numWorkers     = flag.Int("workers", 10, "number of workers")
 	workQueueDepth = flag.Int("queue", 2000, "number of queued files")
 	stride         = flag.Int("stride", 2<<20, "power of 2")
 	showProgress   = flag.Bool("progress", false, "show progress bars")
 )
 
-type bEntry struct {
-	offset int64
-	sz     int
-	data   *bytes.Reader
-	err    error
-	ready  <-chan bool
+// gcsReaderAt adapts a GCS ObjectHandle to work with the archive/zip
+// library.
+type gcsReaderAt struct {
+	ctx context.Context
+	o   *storage.ObjectHandle
 }
 
-type bCache struct {
-	mu     sync.RWMutex
-	bs     []*bEntry
-	ra     io.ReaderAt
-	fsize  int64
+// ReadAt implements io.ReaderAt. ReadAt is a little different from
+// Read in that it will block for input until it can fill the given
+// buffer `p`.
+func (r *gcsReaderAt) ReadAt(p []byte, off int64) (n int, err error) {
+	glog.V(1).Infof("GCS read of %d bytes from offset %d in %q", len(p), off, r.o.ObjectName())
+	rr, err := r.o.NewRangeReader(r.ctx, off, int64(len(p)))
+	if err != nil {
+		return 0, err
+	}
+	defer rr.Close()
+	return io.ReadFull(rr, p)
+}
+
+// blockCache implements a trivial read-through cache. This helps turn
+// small (e.g. 30-byte) reads by archive/zip into larger reads to
+// GCS. GCS charges per-op and has a per-request latency overhead. It
+// is better to read larger chunks and re-use already-ready data as
+// much as possible.
+//
+// Note: This is almost certainly where bugs will hide. Plenty of
+// off-by-one opportunities here.
+type blockCache struct {
+	// mu protects bs
+	mu sync.RWMutex
+	// bs is sorted by offset of cacheEntry
+	bs []*cacheEntry
+
+	ra    io.ReaderAt
+	fsize int64
+
+	// Ideal size of each GCS read (currently also alignment of GCS
+	// read). Must be a power of 2.
 	stride int64
-	max    int
-	lra    []*bEntry
+
+	// The max number of cacheEntry's to retain. Entries are freed in
+	// the order they are added (not LRU).
+	max int
+	// lra tracks the entries in order they were added and will be
+	// removed from the cache.
+	lra []*cacheEntry
 }
 
-func (c *bCache) ReadAt(p []byte, off int64) (n int, err error) {
-	//glog.Printf("^^ %d %d", len(p), off)
+type cacheEntry struct {
+	offset int64
+	// size will be `stride` except for the final block of the gcs
+	// object.
+	sz   int
+	data *bytes.Reader
+	err  error
+	// An underlying read starts async when the entry is added to the
+	// cache. Before using `data` or `err`, block reading from ths
+	// chan.
+	ready <-chan bool
+}
+
+// ReadAt implements io.ReaderAt for the read-through cache.
+func (c *blockCache) ReadAt(p []byte, off int64) (n int, err error) {
+	glog.V(1).Infof("Read-through cache read of %d bytes at offset %d", len(p), off)
 	xs := c.getB(off, int64(len(p)))
 	n = 0
 	for _, x := range xs {
@@ -56,24 +101,25 @@ func (c *bCache) ReadAt(p []byte, off int64) (n int, err error) {
 		if x.err != nil {
 			return n, x.err
 		}
+		// doff is the offset in x.data
 		doff := int(off - x.offset)
 		l := x.sz - doff
-
 		if n+l > len(p) {
 			l = len(p) - n
 		}
-		//		glog.Printf(">> x.off=%d x.sz=%d %d %d %d", x.offset, x.sz, n, l, doff)
 		n2, err := x.data.ReadAt(p[n:n+l], int64(doff))
 		n += n2
 		off += int64(n2)
-		if err != nil /* && err != io.EOF */ {
+		if err != nil {
 			return n, err
 		}
 	}
 	return n, nil
 }
 
-func (c *bCache) tryGetB(off int64) (ret *bEntry) {
+// tryGetB does not perform locking. Attempts to find already-cached
+// block that spans the given offset.
+func (c *blockCache) tryGetB(off int64) (ret *cacheEntry) {
 	i := 0
 	if len(c.bs) != 0 {
 		i = sort.Search(len(c.bs), func(i int) bool { return c.bs[i].offset+int64(c.bs[i].sz)-1 >= off })
@@ -84,7 +130,9 @@ func (c *bCache) tryGetB(off int64) (ret *bEntry) {
 	return c.bs[i]
 }
 
-func (c *bCache) getB(off, sz int64) (ret []*bEntry) {
+// getB returns blocks spanning the given range, in order of start
+// offset. Creates new blocks where needed.
+func (c *blockCache) getB(off, sz int64) (ret []*cacheEntry) {
 	for sz > 0 {
 		c.mu.RLock()
 		buf := c.tryGetB(off)
@@ -98,7 +146,7 @@ func (c *bCache) getB(off, sz int64) (ret []*bEntry) {
 			if boff+l >= c.fsize {
 				l = c.fsize - boff
 			}
-			//			glog.Printf("%% %d %d %d %d %d", off, boff, sz, l, wtf)
+			glog.V(1).Infof("%% %d %d %d %d %d", off, boff, sz, l, wtf)
 			ret = append(ret, c.putB(boff, int(l)))
 		} else {
 			ret = append(ret, buf)
@@ -110,16 +158,21 @@ func (c *bCache) getB(off, sz int64) (ret []*bEntry) {
 	return ret
 }
 
-func (c *bCache) putB(off int64, sz int) *bEntry {
+// putB inserts a new block for the given offset and size, unless one
+// exists in the cache.
+func (c *blockCache) putB(off int64, sz int) *cacheEntry {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if buf := c.tryGetB(off); buf != nil {
+		// TODO: should verify the buf is an exact match. If we ever
+		// relax the alignment constraint, overlapping blocks might be
+		// a thing.
 		return buf
 	}
 
 	d := make([]byte, sz)
 	fin := make(chan bool, 0)
-	e := &bEntry{
+	e := &cacheEntry{
 		offset: off,
 		sz:     sz,
 		ready:  fin,
@@ -130,32 +183,32 @@ func (c *bCache) putB(off int64, sz int) *bEntry {
 		close(fin)
 	}()
 	c.bs = append(c.bs, e)
-	//glog.Printf("adding %d", e.offset)
+	glog.V(1).Infof("adding cache entry for offset %d", e.offset)
 
 	sort.Sort(c)
 	c.lra = append(c.lra, e)
 	over := len(c.lra) - c.max
 	if over > 0 {
-		var tokill []*bEntry
+		var tokill []*cacheEntry
 		tokill, c.lra = c.lra[0:over], c.lra[over:]
 		for _, tk := range tokill {
 			i := sort.Search(len(c.bs), func(i int) bool { return c.bs[i].offset+int64(c.bs[i].sz)-1 >= tk.offset })
 			c.bs = append(c.bs[:i], c.bs[i+1:]...)
-			//glog.Printf("deleting %d", tk.offset)
+			glog.V(1).Infof("deleting cache block for offset %d", tk.offset)
 		}
 	}
 	return e
 }
 
-func (c *bCache) Len() int {
+func (c *blockCache) Len() int {
 	return len(c.bs)
 }
 
-func (c *bCache) Less(i, j int) bool {
+func (c *blockCache) Less(i, j int) bool {
 	return c.bs[i].offset < c.bs[j].offset
 }
 
-func (c *bCache) Swap(i, j int) {
+func (c *blockCache) Swap(i, j int) {
 	c.bs[i], c.bs[j] = c.bs[j], c.bs[i]
 }
 
@@ -175,24 +228,6 @@ func (c *files) Swap(i, j int) {
 	c.fs[i], c.fs[j] = c.fs[j], c.fs[i]
 }
 
-type rdr struct {
-	ctx context.Context
-	o   *storage.ObjectHandle
-}
-
-func (r *rdr) ReadAt(p []byte, off int64) (n int, err error) {
-	//glog.Printf("reading %d bytes from %d", len(p), off)
-	rr, err := r.o.NewRangeReader(r.ctx, off, int64(len(p)))
-	if err != nil {
-		return 0, err
-	}
-	defer rr.Close()
-	return io.ReadFull(rr, p)
-}
-
-func init() {
-}
-
 func main() {
 	flag.Parse()
 	ctx := context.Background()
@@ -207,9 +242,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	cachedReader := &bCache{
+	cachedReader := &blockCache{
 		fsize:  oa.Size,
-		ra:     &rdr{ctx, o.Generation(oa.Generation)},
+		ra:     &gcsReaderAt{ctx, o.Generation(oa.Generation)},
 		stride: int64(*stride),
 		max:    *numWorkers,
 	}
@@ -245,8 +280,6 @@ func main() {
 			}),
 	)
 	bar := prog.AddBar(totalOutputSize,
-		// mpb.BarRemoveOnComplete(),
-		// mpb.PrependDecorators(decor.Name(fn)),
 		mpb.PrependDecorators(decor.AverageSpeed(decor.UnitKB, "%.2f")),
 	)
 
@@ -312,11 +345,6 @@ func main() {
 					// .If(storage.Conditions{DoesNotExist: true})
 					w := db.Object(fn).NewWriter(ctx)
 					w.Size = int64(f.UncompressedSize64)
-					// bar := prog.AddBar(w.Size,
-					// 	mpb.BarRemoveOnComplete(),
-					// 	mpb.PrependDecorators(decor.Name(fn)),
-					// 	mpb.AppendDecorators(decor.AverageSpeed(decor.UnitKB, "%.2f")),
-					// )
 					w.ProgressFunc = func(c int64) { bar.SetCurrent(c) }
 					// w.CRC32C = f.CRC32 nope!
 					if _, err := io.Copy(w, x); err != nil {
@@ -341,5 +369,5 @@ func main() {
 	}
 	close(workQueue)
 	wg.Wait()
-	//prog.Wait()
+	prog.Wait()
 }
