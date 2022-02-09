@@ -1,37 +1,3 @@
-40 workers, 2000 queue; 2MB stride; ~6GB zip file
-handugan.com/big.zip has 1429 entries!
-Compilation started at Sun Feb  6 06:08:14
-Compilation finished at Sun Feb  6 06:28:50
-
-
---
-
-Sort with largest files first
-Compilation started at Sun Feb  6 06:40:09
-Compilation finished at Sun Feb  6 07:01:27
-
----
-80 workers
-Compilation started at Sun Feb  6 07:01:49
-Compilation finished at Sun Feb  6 07:17:12
-
---
-120 workers
-Compilation started at Sun Feb  6 07:18:16
-Compilation finished at Sun Feb  6 07:40:12
-
---
-80 workers
-sort fmro small to large
-Compilation started at Sun Feb  6 07:46:31
-Compilation finished at Sun Feb  6 08:06:10
-
---
-80 workers
-sorted large to small
-(again)
-Compilation started at Sun Feb  6 08:10:53
-Compilation finished at Sun Feb  6 08:28:29
 
 https://github.com/jbenet/go-random-files
 
@@ -39,47 +5,7 @@ go get -u github.com/jbenet/go-random-files/random-files
 
 random-files --depth 3 --files 3 --filesize=$((400 * 1024 * 1024)) --random-size  /mnt/hello/data/
 
-
-
 time gsutil -o GSUtil:parallel_composite_upload_threshold=150M cp big.zip gs://zip-source-1t/
-
-- [1 files][ 23.5 GiB/ 23.5 GiB]   86.8 MiB/s                                   
-Operation completed over 1 objects/23.5 GiB.                                     
-
-real	3m5.908s
-user	2m33.388s
-sys	1m6.772s
-
----
-
-time ./gcs-parallel-unzip --progress --workers=10 --logtostderr
-I0206 22:21:05.120470    8985 main.go:220] zip-source-1t/big.zip has 493 entries!
-130.84KB/s [------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------] 
-
-real    2m16.218s
-user    1m51.000s
-sys     1m44.658s
-
---
-
-mathew@instance-2:~$ time ./gcs-parallel-unzip --progress --workers=20 --logtostderr
-I0206 22:24:53.183542    9113 main.go:220] zip-source-1t/big.zip has 493 entries!
-139.78KB/s [------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------] 
-
-real    2m11.297s
-user    1m48.733s
-sys     1m39.976s
-
---
-
-mathew@instance-2:~$ time ./gcs-parallel-unzip --progress --workers=40 --logtostderr
-I0206 22:28:13.656039    9124 main.go:220] zip-source-1t/big.zip has 493 entries!
-353.12KB/s [------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------] 
-
-real    2m28.802s
-user    1m57.283s
-sys     1m50.095s
-
 
 sudo iftop -t -n
 
@@ -120,20 +46,37 @@ Peak rate (sent/received/total):                     1.32Gb     1.26Gb     2.26G
 ==================================================================================
 
 
+#+begin_src bash
+  time go run github.com/mhandugan/gcs-parallel-unzip/cmd/gcs-parallel-unzip \
+       --progress --workers=10 --logtostderr \
+       --source_bucket=zip-source-1t \
+       --zip_file=shakespeare.zip \
+       --destination_bucket=zip-dest-1t
+#+end_src
 
-mathew@instance-2:~$ time ./gcs-parallel-unzip --progress --workers=20 --logtostderr
-I0206 22:50:32.974870    9474 main.go:220] zip-source-1t/big.zip has 493 entries!
-122.72KB/s [------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------] 
+#+begin_src bash
+  time go run github.com/mhandugan/gcs-parallel-unzip/cmd/gcs-parallel-unzip \
+       --progress --workers=10 --logtostderr \
+       --source_bucket=zip-source-1t \
+       --zip_file=big.zip \
+       --destination_bucket=zip-dest-1t
+#+end_src
 
-real    2m26.118s
-user    1m52.665s
-sys     1m55.889s
+#+begin_src bash
+  time go run github.com/mhandugan/gcs-parallel-unzip/examples/apache_beam \
+       --input gs://zip-source-1t/shakespeare.zip --output gs://zip-dest-1t
+#+end_src
 
-
-(* 122.72 8) 
-
-
-go run github.com/mhandugan/gcs-parallel-unzip/cmd/gcs-parallel-unzip --workers=10 --source_bucket=zip-source-1t --zip_file=big.zip --destination_bucket=zip-dest-1t --logtostderr
-
-
+#+begin_src bash
+  go run github.com/mhandugan/gcs-parallel-unzip/examples/apache_beam \
+     --input gs://zip-source-1t/big.zip \
+     --output gs://zip-dest-1t \
+     --num_workers=20 --max_num_workers=80 \
+     --runner dataflow \
+     --project mathew-gclb-0 \
+     --region us-west1 \
+     --temp_location gs://zip-dest-1t/tmp/ \
+     --staging_location gs://zip-dest-1t/binaries/ \
+     --worker_harness_container_image=apache/beam_go_sdk:latest
+#+end_src
 
