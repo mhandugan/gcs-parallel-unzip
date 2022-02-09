@@ -18,8 +18,6 @@ require (
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/go-cmp v0.5.7 // indirect
 	github.com/googleapis/gax-go/v2 v2.1.1 // indirect
-	github.com/jbenet/go-random v0.0.0-20190219211222-123a90aedc0c // indirect
-	github.com/jbenet/go-random-files v0.0.0-20190219210431-31b3f20ebded // indirect
 	github.com/mattn/go-runewidth v0.0.13 // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
 	go.opencensus.io v0.23.0 // indirect

@@ -131,3 +131,9 @@ sys     1m55.889s
 
 
 (* 122.72 8) 
+
+
+go run github.com/mhandugan/gcs-parallel-unzip/cmd/gcs-parallel-unzip --workers=10 --source_bucket=zip-source-1t --zip_file=big.zip --destination_bucket=zip-dest-1t --logtostderr
+
+
+
