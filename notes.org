@@ -68,15 +68,15 @@ Peak rate (sent/received/total):                     1.32Gb     1.26Gb     2.26G
 #+end_src
 
 #+begin_src bash
-  go run github.com/mhandugan/gcs-parallel-unzip/examples/apache_beam \
-     --input gs://zip-source-1t/big.zip \
-     --output gs://zip-dest-1t \
-     --num_workers=20 --max_num_workers=80 \
-     --runner dataflow \
-     --project mathew-gclb-0 \
-     --region us-west1 \
-     --temp_location gs://zip-dest-1t/tmp/ \
-     --staging_location gs://zip-dest-1t/binaries/ \
-     --worker_harness_container_image=apache/beam_go_sdk:latest
+  time go run github.com/mhandugan/gcs-parallel-unzip/examples/apache_beam \
+       --input gs://zip-source-1t/big.zip \
+       --output gs://zip-dest-1t \
+       --num_workers=20 --max_num_workers=80 \
+       --runner dataflow \
+       --project mathew-gclb-0 \
+       --region us-west1 \
+       --temp_location gs://zip-dest-1t/tmp/ \
+       --staging_location gs://zip-dest-1t/binaries/ \
+       --worker_harness_container_image=apache/beam_go_sdk:latest
 #+end_src
 
