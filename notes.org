@@ -80,3 +80,21 @@ Peak rate (sent/received/total):                     1.32Gb     1.26Gb     2.26G
        --worker_harness_container_image=apache/beam_go_sdk:latest
 #+end_src
 
+
+* python
+
+Works with google-cloud-storage and stock zipfile APIs, no extra code
+required.
+
+https://docs.python.org/3/library/zipfile.html - python zipfile
+library does accept a "file-like object" it is not clear which file
+methods are important
+
+https://github.com/googleapis/python-storage - does support ranged
+reads, but wants to write to a file-like object; this can be some kind
+of buffer object creating a file-like object with seek/pread
+
+sudo apt install python3.9-venv
+python3 -m venv env
+source env/bin/activate
+pip3 install google-cloud-storage
