@@ -1,12 +1,12 @@
 module github.com/mhandugan/gcs-parallel-unzip
 
-go 1.17
+go 1.18
 
 require (
 	cloud.google.com/go/storage v1.20.0
 	github.com/apache/beam/sdks/v2 v2.36.0
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
-	github.com/vbauerster/mpb/v7 v7.3.2
+	github.com/vbauerster/mpb/v7 v7.4.1
 )
 
 require (
@@ -25,7 +25,7 @@ require (
 	go.opencensus.io v0.23.0 // indirect
 	golang.org/x/net v0.0.0-20210503060351-7fd8e65b6420 // indirect
 	golang.org/x/oauth2 v0.0.0-20211104180415-d3ed0bb246c8 // indirect
-	golang.org/x/sys v0.0.0-20220114195835-da31bd327af9 // indirect
+	golang.org/x/sys v0.0.0-20220209214540-3681064d5158 // indirect
 	golang.org/x/text v0.3.6 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	google.golang.org/api v0.66.0 // indirect
